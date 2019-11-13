@@ -5,7 +5,9 @@ IP Address Resolver
 ```
 Usage of ./ipresolver:
   -i string
-        Subdomains list
+        Domains list
+  -r string
+        Resolver file (Format: ip:port)
   -t int
         Threads to run (default 5)
 ```

@@ -21,7 +21,7 @@ var (
 )
 
 func main() {
-	flag.StringVar(&inputFile, "i", "", "Subdomains list")
+	flag.StringVar(&inputFile, "i", "", "Domains list")
 	flag.IntVar(&threads, "t", 5, "Threads to run")
 	flag.StringVar(&resolverFile, "r", "", "Resolver file (Format: ip:port)")
 	flag.Parse()
