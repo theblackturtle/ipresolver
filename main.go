@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/OWASP/Amass/v3/requests"
 	"github.com/OWASP/Amass/v3/resolvers"
 )
 
@@ -17,13 +18,15 @@ var (
 	inputFile     string
 	threads       int
 	resolverFile  string
-	ResolversList []string
+	resolversList []string
+	onlyIp        bool
 )
 
 func main() {
 	flag.StringVar(&inputFile, "i", "", "Domains list")
 	flag.IntVar(&threads, "t", 5, "Threads to run")
 	flag.StringVar(&resolverFile, "r", "", "Resolver file (Format: ip:port)")
+	flag.BoolVar(&onlyIp, "only-ip", false, "Output only IP Addresses")
 	flag.Parse()
 
 	if inputFile == "" {
@@ -36,12 +39,13 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
+		defer rf.Close()
 		rs := bufio.NewScanner(rf)
 		for rs.Scan() {
-			ResolversList = append(ResolversList, rs.Text())
+			resolversList = append(resolversList, rs.Text())
 		}
 	} else {
-		ResolversList = []string{
+		resolversList = []string{
 			"1.1.1.1:53",     // Cloudflare
 			"8.8.8.8:53",     // Google
 			"64.6.64.6:53",   // Verisign
@@ -56,8 +60,9 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	defer f.Close()
 
-	pool := resolvers.SetupResolverPool(ResolversList, false, false, nil)
+	pool := resolvers.SetupResolverPool(resolversList, false, false, nil)
 	if pool == nil {
 		fmt.Println("Failed to init pool")
 		os.Exit(0)
@@ -68,19 +73,19 @@ func main() {
 	ctx := context.Background()
 	defer ctx.Done()
 
-	var unsortIPList []string
+	var answers []requests.DNSAnswer
 	for i := 0; i < threads; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for domain := range jobChan {
+				var ans []requests.DNSAnswer
 				if a, _, err := pool.Resolve(ctx, domain, "A", resolvers.PriorityHigh); err == nil {
 					if a != nil && len(a) > 0 {
-						for _, e := range a {
-							unsortIPList = append(unsortIPList, e.Data)
-						}
+						ans = append(ans, a...)
 					}
 				}
+				answers = append(answers, ans...)
 			}
 		}()
 	}
@@ -91,11 +96,23 @@ func main() {
 	}
 	close(jobChan)
 	wg.Wait()
-	for _, ip := range removeDuplicated(unsortIPList) {
-		netIP := net.ParseIP(ip)
+
+	var rawResultsList []string
+	for _, ans := range answers {
+		netIP := net.ParseIP(ans.Data)
 		if netIP.IsGlobalUnicast() {
-			fmt.Println(netIP.String())
+			if onlyIp {
+				rawResultsList = append(rawResultsList, netIP.String())
+			} else {
+				rawResultsList = append(rawResultsList, fmt.Sprintf("%s,%s", ans.Name, netIP.String()))
+
+			}
 		}
+	}
+
+	// Print removed duplicated list
+	for _, r := range removeDuplicated(rawResultsList) {
+		fmt.Println(r)
 	}
 }
 
@@ -106,8 +123,6 @@ func removeDuplicated(ips []string) []string {
 		if _, ok := seen[ip]; !ok {
 			seen[ip] = true
 			uniqList = append(uniqList, ip)
-		} else {
-			continue
 		}
 	}
 	return uniqList
