@@ -6,6 +6,8 @@ IP Address Resolver
 Usage of ./ipresolver:
   -i string
         Domains list
+  -only-ip
+        Output only IP Addresses
   -r string
         Resolver file (Format: ip:port)
   -t int
