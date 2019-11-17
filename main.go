@@ -5,21 +5,27 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
 	"sync"
 
+	"github.com/OWASP/Amass/v3/net/http"
+	amasshttp "github.com/OWASP/Amass/v3/net/http"
 	"github.com/OWASP/Amass/v3/requests"
 	"github.com/OWASP/Amass/v3/resolvers"
+	"github.com/OWASP/Amass/v3/stringset"
 )
 
+const publicDNSResolverBaseURL = "https://public-dns.info/nameserver/"
+
 var (
-	inputFile     string
-	threads       int
-	resolverFile  string
-	resolversList []string
-	onlyIp        bool
+	inputFile    string
+	threads      int
+	resolverFile string
+	onlyIp       bool
+	PublicDNS    bool
 )
 
 func main() {
@@ -27,6 +33,7 @@ func main() {
 	flag.IntVar(&threads, "t", 5, "Threads to run")
 	flag.StringVar(&resolverFile, "r", "", "Resolver file (Format: ip:port)")
 	flag.BoolVar(&onlyIp, "only-ip", false, "Output only IP Addresses")
+	flag.BoolVar(&PublicDNS, "public-dns", false, "Output only IP Addresses")
 	flag.Parse()
 
 	if inputFile == "" {
@@ -34,7 +41,24 @@ func main() {
 		os.Exit(0)
 	}
 
-	if resolverFile != "" {
+	var resolversList []string
+
+	if PublicDNS {
+		cc := "us"
+		if result := http.ClientCountryCode(); result != "" {
+			cc = result
+		}
+		url := publicDNSResolverBaseURL + cc + ".txt"
+		if resolvers, err := getWordlistByURL(url); err == nil && len(resolvers) >= 50 {
+			resolversList = stringset.Deduplicate(resolvers)
+		} else if cc != "us" {
+			url = publicDNSResolverBaseURL + "us.txt"
+
+			if resolvers, err = getWordlistByURL(url); err == nil {
+				resolversList = stringset.Deduplicate(resolvers)
+			}
+		}
+	} else if resolverFile != "" {
 		rf, err := os.Open(resolverFile)
 		if err != nil {
 			panic(err)
@@ -126,4 +150,26 @@ func removeDuplicated(ips []string) []string {
 		}
 	}
 	return uniqList
+}
+
+func getWordlistByURL(url string) ([]string, error) {
+	page, err := amasshttp.RequestWebPage(url, nil, nil, "", "")
+	if err != nil {
+		return nil, fmt.Errorf("Failed to obtain the wordlist at %s: %v", url, err)
+	}
+	return getWordList(strings.NewReader(page))
+}
+
+func getWordList(reader io.Reader) ([]string, error) {
+	var words []string
+
+	scanner := bufio.NewScanner(reader)
+	for scanner.Scan() {
+		// Get the next word in the list
+		w := strings.TrimSpace(scanner.Text())
+		if err := scanner.Err(); err == nil && w != "" {
+			words = append(words, w)
+		}
+	}
+	return stringset.Deduplicate(words), nil
 }
